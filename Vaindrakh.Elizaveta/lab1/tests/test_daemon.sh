@@ -32,7 +32,7 @@ first_directory="$temporary_directory/first"
 second_directory="$temporary_directory/second"
 mkdir -p "$first_directory" "$second_directory"
 config_file="$temporary_directory/monitor.conf"
-test_log="$temporary_directory/test.log"
+test_log="$first_directory/disk_monitor.log"
 pid_file="$temporary_directory/monitor.pid"
 printf 'DIR=%s\n' "$first_directory" > "$config_file"
 
@@ -51,6 +51,12 @@ wait_for "grep -q 'watching 1 configured directory' '$test_log'" || fail "daemon
 printf 'hello\n' > "$first_directory/file.txt"
 wait_for "grep -q 'path=$first_directory/file.txt' '$test_log'" || fail "file event was not logged"
 grep -q 'local0 .*event=' "$test_log" || fail "event was not sent with local0 facility"
+sleep 0.2
+stable_line_count=$(wc -l < "$test_log")
+sleep 0.2
+if [ "$(wc -l < "$test_log")" -gt "$stable_line_count" ]; then
+    fail "internal log file caused a recursive event loop"
+fi
 mkdir "$first_directory/nested"
 printf 'nested\n' > "$first_directory/nested/nested.txt"
 wait_for "grep -q 'path=$first_directory/nested/nested.txt' '$test_log'" || fail "recursive event was not logged"

@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <filesystem>
+#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 
@@ -27,6 +28,27 @@ bool isSameOrBelow(const std::filesystem::path& candidate,
     return relative.empty() || relative == "." ||
            (relative.begin() != relative.end() &&
             *relative.begin() != std::filesystem::path(".."));
+}
+
+std::string comparisonKey(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto canonical = std::filesystem::weakly_canonical(path, error);
+    return (error ? path.lexically_normal() : canonical).generic_string();
+}
+
+bool isInternalLogPath(const std::filesystem::path& path) {
+    const auto event_key = comparisonKey(path);
+    if (event_key == comparisonKey("/var/log/disk_monitor.log")) {
+        return true;
+    }
+
+    // The test logger can intentionally be placed inside a watched directory.
+    // It must be ignored for the same reason as the real rsyslog destination.
+    if (const char* test_log = std::getenv("DISK_MONITOR_TEST_LOG");
+        test_log != nullptr && *test_log != '\0') {
+        return event_key == comparisonKey(test_log);
+    }
+    return false;
 }
 
 }  // namespace
@@ -169,7 +191,7 @@ void FileWatcher::consumeEvents() {
                 if (event->len != 0) {
                     path /= std::string(event->name);
                 }
-                if ((event->mask & IN_IGNORED) == 0) {
+                if ((event->mask & IN_IGNORED) == 0 && !isInternalLogPath(path)) {
                     logEvent(*event, path);
                 }
                 if ((event->mask & (IN_CREATE | IN_MOVED_TO)) != 0 &&

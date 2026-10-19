@@ -29,16 +29,26 @@ std::optional<pid_t> readPid(const std::filesystem::path& path) {
 }
 
 bool isDiskMonitorProcess(const pid_t pid) {
-    std::ifstream command_name("/proc/" + std::to_string(pid) + "/comm");
+    const auto proc_path = "/proc/" + std::to_string(pid);
+    std::ifstream command_name(proc_path + "/comm");
     std::string name;
-    if (command_name >> name && name == "disk_monitor") {
-        return true;
+    if (!(command_name >> name) || name != "disk_monitor") {
+        return false;
     }
 
-    std::ifstream command_line("/proc/" + std::to_string(pid) + "/cmdline");
-    std::string contents((std::istreambuf_iterator<char>(command_line)),
-                         std::istreambuf_iterator<char>());
-    return contents.find("disk_monitor") != std::string::npos;
+    // The process name is an additional guard, but it is not sufficient on its
+    // own: an unrelated executable can change its comm value. Compare the
+    // executable identities through /proc before allowing SIGTERM.
+    struct stat current_executable {};
+    struct stat candidate_executable {};
+    if (stat("/proc/self/exe", &current_executable) == 0 &&
+        stat((proc_path + "/exe").c_str(), &candidate_executable) == 0) {
+        return current_executable.st_dev == candidate_executable.st_dev &&
+               current_executable.st_ino == candidate_executable.st_ino;
+    }
+
+    // If the executable identity cannot be confirmed, refuse to send SIGTERM.
+    return false;
 }
 
 }  // namespace
